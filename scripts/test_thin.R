@@ -49,7 +49,7 @@ for (i in 1:nrow(dat)) {
   test[i] = occ(dat[i,'Latin.Name'], from = 'gbif', limit = 1)$gbif$meta$found
 }
 dat = cbind(dat, test)
-targets = dat[which(dat$test >= 500 & dat$test <=5000), ]
+targets = dat[which(dat$test >= 500 & dat$test <=10000), ]
 
 tax.list = targets$Latin.Name
 
@@ -326,6 +326,14 @@ evalfun = function(tax) {
     writeRaster(m.thin, filename = filethin)
     filespThin = paste('rasters/', gsub(" ", "_", tax), 'spThin', sep = '_')
     writeRaster(m.spthin, filename = filespThin)
+    
+    distsbase = paste('dists/', gsub(" ", "_", tax), 'base', sep = '_')
+    writeRaster(m, file = distsbase)
+    diststhin = paste('dists/', gsub(" ", "_", tax), 'poThin', sep = '_')
+    writeRaster(m.thin, file = diststhin)
+    distsspThin = paste('dists/', gsub(" ", "_", tax), 'spThin', sep = '_')
+    write.csv(m.spthin, file = distsspThin)
+    
     return(
       c(
         tax,
@@ -423,8 +431,10 @@ ggplot(data = colldf) +
   theme(legend.position="right")
 
 
-n = 200
-taxstub = tax.list[n]
+
+## Compare to Little shapefile "Expert" range maps
+n = 253
+taxstub = targets[n, 'SHP..']
 tax = targets[n,'Latin.Name']
 filebase = paste('rasters/', gsub(" ", "_", tax), 'base', sep = '_')
 m = raster::raster(filebase)
@@ -432,3 +442,15 @@ filethin = paste('rasters/', gsub(" ", "_", tax), 'poThin', sep = '_')
 m.thin = raster::raster(filethin)
 filespThin = paste('rasters/', gsub(" ", "_", tax), 'spThin', sep = '_')
 m.spThin = raster::raster(filespThin)
+
+shp = readOGR(paste('USTreeAtlas/SHP/', taxstub, sep = ''), taxstub)
+shpr = rasterize(shp, m)>=1
+shpr[is.na(shpr[])] <- 0 
+shpr = mask(shpr, r2[[1]])
+
+
+shpr.df = as.data.frame(shpr, xy = TRUE)
+mdf = as.data.frame(m, xy = TRUE)
+m.thindf = as.data.frame(m.thin, xy=TRUE)
+plot(density(mdf$layer[which(shpr.df$layer>0)],na.rm=T), ylim = c(0, 3.5))
+points(density(m.thindf$layer[which(shpr.df$layer>0)], na.rm=T),type ='l')
