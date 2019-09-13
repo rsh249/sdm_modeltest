@@ -15,12 +15,14 @@ library(reshape)
 #parameters
 thin.dist = 45
 parallel = FALSE
-nclus = 48
-method = 'randomkfold'
+nclus = 60
+method = 'block'
 kfolds = 10
-ext = extent(c(-135,-50, 10, 65))
+buffer = 2000
+ext = extent(c(-180,-40, 0, 80))
 
-#setup ENMTools
+#setup 
+
 #devtools::install_github("rsh249/cRacle")
 library(cRacle)
 
@@ -46,10 +48,10 @@ dat = read.csv('USTreeAtlas/Little_datatable.csv', stringsAsFactors = FALSE)
 ##TEST tax.list for GBIF hits:
 test = vector()
 for (i in 1:nrow(dat)) {
-  test[i] = occ(dat[i,'Latin.Name'], from = 'gbif', limit = 1)$gbif$meta$found
+  test[i] = occ(dat[i, 'Latin.Name'], from = 'gbif', limit = 1)$gbif$meta$found
 }
 dat = cbind(dat, test)
-targets = dat[which(dat$test >= 500 & dat$test <=10000), ]
+targets = dat[which(dat$test >= 500 & dat$test <= 10000), ]
 
 tax.list = targets$Latin.Name
 
@@ -66,6 +68,7 @@ if (!file.exists('envirem_clim.gri')) {
 
 r = stack(envir, envir.topo)
 r2 = crop(r, ext)
+r2 = r2[[c(1, 2, 3, 4, 6, 8, 9, 10, 13, 16)]]
 
 
 
@@ -79,14 +82,13 @@ evalfun = function(tax) {
     occ = cbind(occ[c('longitude', 'latitude')], occ.ex)
     occ = na.omit(occ)
     
-    
     #ext = extent(c(min(occ$longitude)-5, max(occ$longitude) + 5, min(occ$latitude)-5, max(occ$latitude)+5))
     
     
     #background sampling
     bg.pts = cRacle::rad_bg(occ[, c('longitude', 'latitude')],
                             r2,
-                            radius = 2500,
+                            radius = buffer,
                             n = 100000 / nrow(occ))
     #bg.pts = poThin(bg.pts,spacing = thin.dist, dimension = nrow(bg.pts), lat = 'lat', lon = 'lon')
     
@@ -158,7 +160,7 @@ evalfun = function(tax) {
                      best_mod)
     th.sub = threshold(e.sub)
     thr = m > th.sub$equal_sens_spec
-    plot(thr, col = c('black', 'blue'), main = 'no thin')
+  #  plot(thr, col = c('black', 'blue'), main = 'no thin')
     bin.occ = extract(thr, set.eval@occ.pts)
     bin.abs = extract(thr, set.eval@bg.pts)
     ev.set.bin <- evaluate(bin.occ, bin.abs)
@@ -207,9 +209,9 @@ evalfun = function(tax) {
     
     th.sub.thin = threshold(e.sub.thin)
     thr.thin = m.thin > th.sub.thin$equal_sens_spec
-    plot(thr.thin,
-         col = c('black', 'blue'),
-         main = 'poThin')
+   # plot(thr.thin,
+     #    col = c('black', 'blue'),
+        # main = 'poThin')
     bin.occ.thin = extract(thr.thin, occ.thin)
     bin.abs.thin = extract(thr.thin, set.eval@bg.pts)
     ev.set.thin.bin <- evaluate(bin.occ.thin, bin.abs.thin)
@@ -261,9 +263,9 @@ evalfun = function(tax) {
                             best_mod.spthin)
     th.sub.spthin = threshold(e.sub.spthin)
     thr.spthin = m.spthin > th.sub.spthin$equal_sens_spec
-    plot(thr.spthin,
-         col = c('black', 'blue'),
-         main = 'spThin')
+    #plot(thr.spthin,
+       #  col = c('black', 'blue'),
+         #main = 'spThin')
     
     bin.occ.spthin = extract(thr.spthin, sp.thin)
     bin.abs.spthin = extract(thr.spthin, set.eval@bg.pts)
@@ -321,18 +323,18 @@ evalfun = function(tax) {
       checkNegatives = FALSE
     )
     filebase = paste('rasters/', gsub(" ", "_", tax), 'base', sep = '_')
-    writeRaster(m, filename = filebase)
+    writeRaster(m, filename = filebase, overwrite = TRUE)
     filethin = paste('rasters/', gsub(" ", "_", tax), 'poThin', sep = '_')
-    writeRaster(m.thin, filename = filethin)
+    writeRaster(m.thin, filename = filethin, overwrite = TRUE)
     filespThin = paste('rasters/', gsub(" ", "_", tax), 'spThin', sep = '_')
-    writeRaster(m.spthin, filename = filespThin)
+    writeRaster(m.spthin, filename = filespThin, overwrite = TRUE)
     
     distsbase = paste('dists/', gsub(" ", "_", tax), 'base', sep = '_')
-    writeRaster(m, file = distsbase)
+    write.csv(occ, file = distsbase)
     diststhin = paste('dists/', gsub(" ", "_", tax), 'poThin', sep = '_')
-    writeRaster(m.thin, file = diststhin)
+    write.csv(occ.thin, file = diststhin)
     distsspThin = paste('dists/', gsub(" ", "_", tax), 'spThin', sep = '_')
-    write.csv(m.spthin, file = distsspThin)
+    write.csv(sp.thin, file = distsspThin)
     
     return(
       c(
@@ -375,7 +377,16 @@ proc.time() - p
 stopCluster(cl)
 
 #Collect results
-colldf = (coll[[1]]); for(i in 2:length(coll)){colldf = rbind(colldf, coll[[i]])}
+colldf = (coll[[1]])
+
+
+for (i in 2:length(coll)) {
+  if (!is.na(coll[i])) {
+    colldf = rbind(colldf, coll[[i]])
+    
+  }
+}
+
 colnames(colldf) = c(
   'tax',
   'poThin.time',
@@ -394,63 +405,140 @@ colnames(colldf) = c(
   'sp2po.thr'
 )
 colldf = as.data.frame(colldf)
-for(co in 2:ncol(colldf)){
-  colldf[,co] = as.numeric(as.character(colldf[,co]))
+for (co in 2:ncol(colldf)) {
+  colldf[, co] = as.numeric(as.character(colldf[, co]))
 }
 
 
 #plotting
 
-ggplot(data=colldf) + 
-  geom_point(aes(x=poThin.time, y=spthin.time)) +
+ggplot(data = colldf) +
+  geom_point(aes(x = poThin.time, y = spthin.time)) +
   scale_y_log10() +
   theme_linedraw() +
   xlab('poThin time (s)') +
   ylab('spThin time (s)')
 
-niche.overlap = melt(colldf,  id.vars = "tax", measure.vars = c('un2po', 'un2sp', 'sp2po'))
-ggplot(data=niche.overlap, aes(x=variable, y=value)) +
-  geom_boxplot() +
-  geom_jitter(position=position_jitter(0.05))
+niche.overlap = melt(colldf,
+                     id.vars = "tax",
+                     measure.vars = c('un2po', 'un2sp', 'sp2po'))
+ggplot(data = niche.overlap, aes(x = variable, y = value)) +
+  geom_violin() +
+  geom_jitter(position = position_jitter(0.02)) +
+  theme_linedraw()
+ggsave('niche_overlap.png', dpi=500, width = 7.25, height = 4)
 
-niche.overlap.thr = melt(colldf,  id.vars = "tax", measure.vars = c('un2po.thr', 'un2sp.thr', 'sp2po.thr'))
-ggplot(data=niche.overlap.thr, aes(x=variable, y=value)) +
+##Test niche overlap differences
+aov.overlap = aov(formula = value ~ variable, data = niche.overlap)
+niche.tukeyHSD = TukeyHSD(aov.overlap)
+
+
+niche.overlap.thr = melt(
+  colldf,
+  id.vars = "tax",
+  measure.vars = c('un2po.thr', 'un2sp.thr', 'sp2po.thr')
+)
+ggplot(data = niche.overlap.thr, aes(x = variable, y = value)) +
   geom_boxplot() +
-  geom_jitter(position=position_jitter(0.05))
+  geom_jitter(position = position_jitter(0.05))
 
 
 
 ### REMEMBER TO ADD LEGEND
 ggplot(data = colldf) +
-    geom_point(aes(x=occ.count, y = poThin.time)) +
-    geom_point(aes(x=occ.count, y = spthin.time), col='blue')  +
+  geom_point(aes(x = occ.count, y = poThin.time/60)) +
+  geom_point(aes(x = occ.count, y = spthin.time/60), col = 'darkblue')  +
+  geom_smooth(aes(x = occ.count, y = poThin.time/60), method='loess', col = 'black') +
+  geom_smooth(aes(x = occ.count, y = spthin.time/60), col = 'darkblue', method = 'loess')  +
   scale_y_sqrt() +
-  theme_linedraw() + 
+  theme_linedraw() +
   xlab('Starting Occurrence Count') +
-  ylab('Time (s)') +
-  theme(legend.position="right")
+  ylab('Time (min)') +
+  theme(legend.position = "right")
+ggsave('thin_timings.png', dpi = 500, width = 7.25, height = 4)
 
 
 
 ## Compare to Little shapefile "Expert" range maps
-n = 253
-taxstub = targets[n, 'SHP..']
-tax = targets[n,'Latin.Name']
-filebase = paste('rasters/', gsub(" ", "_", tax), 'base', sep = '_')
-m = raster::raster(filebase)
-filethin = paste('rasters/', gsub(" ", "_", tax), 'poThin', sep = '_')
-m.thin = raster::raster(filethin)
-filespThin = paste('rasters/', gsub(" ", "_", tax), 'spThin', sep = '_')
-m.spThin = raster::raster(filespThin)
+little.map.eval <- function(n) {
+  out = tryCatch({
+    taxstub = targets[n, 'SHP..']
+    tax = targets[n, 'Latin.Name']
+    filebase = paste('rasters/', gsub(" ", "_", tax), 'base', sep = '_')
+    m = raster::raster(filebase)
+    filethin = paste('rasters/', gsub(" ", "_", tax), 'poThin', sep = '_')
+    m.thin = raster::raster(filethin)
+    filespThin = paste('rasters/', gsub(" ", "_", tax), 'spThin', sep = '_')
+    m.spThin = raster::raster(filespThin)
+    
+    shp = readOGR(paste('USTreeAtlas/SHP/', taxstub, sep = ''), taxstub)
+    shpr = rasterize(shp, m) >= 1
+    shpr[is.na(shpr[])] <- 0
+    shpr = mask(shpr, r2[[1]])
+    
+    
+    #shpr.df = as.data.frame(shpr, xy = TRUE)
+    #mdf = as.data.frame(m, xy = TRUE)
+    #m.thindf = as.data.frame(m.thin, xy = TRUE)
+    #m.spthindf = as.data.frame(m.spThin, xy = TRUE)
+    # plot(density(mdf$layer[which(shpr.df$layer > 0)], na.rm = T), ylim = c(0, 3.5))
+    # points(density(m.thindf$layer[which(shpr.df$layer > 0)], na.rm = T), type =
+    #          'l')
+    # points(density(m.spthindf$layer[which(shpr.df$layer > 0)], na.rm = T), type =
+    #          'l')
+    distsbase = paste('dists/', gsub(" ", "_", tax), 'base', sep = '_')
+    
+    dist = read.csv(distsbase, stringsAsFactors = F)
+    dist$longitude = as.numeric(dist$longitude)
+    dist$latitude = as.numeric(dist$latitude)
+    dist.bg = vegdistmod::rad_bg(dist[,3:4], r2, buffer/2,
+                                 n = 100000 / nrow(dist))
+    bg.t = poThin(dist.bg, spacing = thin.dist, 
+                  dimension = nrow(dist.bg), 
+                  lat = 'lat', 
+                  lon='lon')
+    if (length(bg.t) < 1) {
+      dist.bg = dist.bg
+    } else {
+      dist.bg = dist.bg[-bg.t,]
+    }
+    
+    m.ex = raster::extract(stack(m, shpr), dist.bg[,c('lon', 'lat')])
+    m.ex = na.omit(m.ex)
+    m.ev = evaluate(m.ex[m.ex[, 2] == 1, 1], m.ex[m.ex[, 2] == 0, 1])
+    
+    m.spthin.ex = raster::extract(stack(m.spThin, shpr), dist.bg[,c('lon', 'lat')])
+    m.spthin.ex = na.omit(m.spthin.ex)
+    m.spthin.ev = evaluate(m.spthin.ex[m.spthin.ex[, 2] == 1, 1], m.spthin.ex[m.spthin.ex[, 2] == 0, 1])
+    
+    m.thin.ex = raster::extract(stack(m.thin, shpr), dist.bg[,c('lon', 'lat')])
+    m.thin.ex = na.omit(m.thin.ex)
+    m.thin.ev = evaluate(m.thin.ex[m.thin.ex[, 2] == 1, 1], m.thin.ex[m.thin.ex[, 2] == 0, 1])
+    return(c(m.ev@auc, m.thin.ev@auc, m.spthin.ev@auc))
+  },
+  error = function(cond) {
+    # Choose a return value in case of error
+    return(NA)
+  })
+}
+minclus = nclus/8 ; #Smaller cluster for memory intensive steps
+cl2 = makeCluster(minclus, type = 'FORK')
+little.auc.l = parLapplyLB(cl2,  1:nrow(targets), little.map.eval, chunk.size = 1)
 
-shp = readOGR(paste('USTreeAtlas/SHP/', taxstub, sep = ''), taxstub)
-shpr = rasterize(shp, m)>=1
-shpr[is.na(shpr[])] <- 0 
-shpr = mask(shpr, r2[[1]])
+#little.auc.l = parLapply(cl2,  1:minclus, little.map.eval)
+stopCluster(cl2)
 
+little.auc = little.auc.l[[1]]
+for (co in 2:length(little.auc.l)) {
+  little.auc= rbind(little.auc, little.auc.l[[co]])
+}
 
-shpr.df = as.data.frame(shpr, xy = TRUE)
-mdf = as.data.frame(m, xy = TRUE)
-m.thindf = as.data.frame(m.thin, xy=TRUE)
-plot(density(mdf$layer[which(shpr.df$layer>0)],na.rm=T), ylim = c(0, 3.5))
-points(density(m.thindf$layer[which(shpr.df$layer>0)], na.rm=T),type ='l')
+colnames(little.auc) = c('base.auc', 'poThin.auc', 'spThin.auc')
+little.auc.m = melt(little.auc)
+
+ggplot(data=little.auc.m) + 
+  geom_boxplot(aes(x=X2, y=value))
+
+##Test niche overlap differences
+aov.little.auc = aov(formula = value ~ X2, data = little.auc.m)
+little.auc.tukeyHSD = TukeyHSD(aov.little.auc)
